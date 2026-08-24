@@ -78,6 +78,26 @@ Edit `appsettings.json` before installing:
 | `PollIntervalSeconds` | `int` | `60` | How often the service checks whether it's time to run |
 | `GitExecutablePath` | `string` | `"git"` | Path to the git executable |
 
+### Managing multiple repos
+
+`RepoPaths` is a JSON array — add one entry per repo, separated by
+commas, each its own quoted string. There's no special separator
+character inside a single string; each repo just gets its own array
+element. Remember to escape backslashes in Windows paths (`\\`, not
+`\`):
+
+```json
+"RepoPaths": [
+  "C:\\path\\to\\first-repo",
+  "C:\\path\\to\\second-repo",
+  "D:\\projects\\third-repo"
+]
+```
+
+Every repo in the list is cleaned up independently on the same
+schedule — if one repo is missing or not a git repo, it's skipped and
+logged, the rest still run.
+
 ## Install
 
 From an **Administrator** PowerShell:
