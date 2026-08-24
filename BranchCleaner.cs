@@ -21,6 +21,11 @@ public sealed class BranchCleaner(
         // "ahead N" (unpushed local commits) can only be read from `branch -vv` before
         // `fetch -p` prunes the stale remote-tracking ref — once pruned, a branch just
         // shows "gone" with no way to tell whether it had commits that were never pushed.
+        // This makes the protection best-effort, not a guarantee: ANY prune of that ref —
+        // an IDE's background auto-fetch, a manual `git fetch`/`git pull`, another tool —
+        // permanently destroys the signal before this method ever runs, with no trace that
+        // it happened. If something else already pruned it, this sees a plain "gone" branch
+        // and deletes it even if it had unpushed commits. See docs/design.md.
         var preFetchBranchResult = await RunGitAsync(repoPath, ["branch", "-vv"], cancellationToken);
         var aheadCounts = preFetchBranchResult.ExitCode == 0
             ? ParseAheadCounts(preFetchBranchResult.StandardOutput)

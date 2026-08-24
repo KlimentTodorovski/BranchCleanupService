@@ -108,16 +108,44 @@ service restarts later the same day.
      do not attempt deletion.
    - If the pre-fetch snapshot showed it `ahead N` (N > 0) of its last
      known remote state → log "skipped (unpushed local commits)" with
-     the count, do not attempt deletion. This is a best-effort check: it
-     only catches unpushed commits on the *first* run after the remote
-     branch disappears. Once a run has fetched-and-pruned once, the
-     comparison target is gone for good and later runs can no longer
-     detect it — there's no local history of "what the ahead count used
-     to be" beyond that first observation.
+     the count, do not attempt deletion. See "Known limitation" below —
+     this check is best-effort, not a guarantee.
    - Otherwise run `git branch -D <name>`. Log success or failure
      (capturing stderr) per branch. A single branch failing to delete
      (e.g. it's checked out in a linked worktree) does not stop the rest
      of the batch.
+
+### Known limitation: unpushed-commit protection is best-effort
+
+The `ahead N` signal this relies on only exists in the brief window
+before *anything* runs `git fetch -p` (or an equivalent prune) after the
+remote branch is deleted. The very first such prune — from any source —
+permanently destroys it, with no trace that it happened:
+
+- An IDE's or Git client's background auto-fetch.
+- A manual `git fetch` or `git pull` you (or anyone) run in that repo.
+- This service's own previous run — once it has fetched-and-pruned a
+  branch once, it can never recover that branch's ahead-count again.
+- Even something as simple as inspecting the repo's state with
+  `git fetch -p` yourself before the service gets a chance to run.
+
+If any of those wins the race, the branch just looks like a plain `gone`
+branch by the time this service evaluates it — indistinguishable from
+one that was cleanly pushed and merged — and it **will** be force-deleted
+even if it had commits that were never pushed anywhere. This was observed
+directly during manual testing: running a diagnostic `git fetch -p` to
+preview which branches were gone, immediately before running the service,
+was enough to silently disable the protection for a branch that did have
+unpushed local commits.
+
+This is a deliberate trade-off, not a bug to be fixed silently: a fully
+reliable version would need to persist each branch's last-known tip and
+remote SHA across runs (independent of git's own live, and easily
+clobbered, tracking state) so it could detect "this branch has commits
+beyond what I last saw on the remote" even after some other process has
+already pruned the ref. That's future work, not implemented here.
+**Treat this protection as a nice-to-have that sometimes helps, not as a
+substitute for pushing or backing up work you care about.**
 
 ### Logging
 
