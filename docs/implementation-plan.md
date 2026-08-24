@@ -157,42 +157,23 @@ no central package management.
 
 ---
 
-### Task 4 (follow-up): Unpushed-commit protection
+### Task 4 (follow-up, since reverted): Unpushed-commit protection
 
-Added after the initial 3 tasks, in response to a request to never
-force-delete a gone branch that still has local commits nobody ever
-pushed.
+Briefly added after the initial 3 tasks: `BranchCleaner.cs` snapshotted
+`git branch -vv` before `git fetch -p` to catch an `ahead N` count per
+branch, then skipped deleting any gone branch that still had unpushed
+commits. Real-world testing showed this was unreliable — any `git fetch
+-p` from any source (an IDE's background auto-fetch, a manual fetch,
+even just inspecting repo state) permanently destroys the one-time
+`ahead` signal it depends on before the service ever sees it, with no
+trace that it happened. In one test, a diagnostic `git fetch -p` run
+moments before the service was enough to make it force-delete a branch
+that did have an unpushed commit.
 
-**Files:**
-- `BranchCleaner.cs` (modified)
-
-**Steps:**
-1. Snapshot `git branch -vv` **before** `git fetch -p`, parsing an
-   `ahead N` count per branch out of the tracking bracket (e.g.
-   `[origin/foo: ahead 2]`). This has to happen pre-fetch: once `fetch
-   -p` prunes a stale remote-tracking ref, there is nothing left to diff
-   the local branch against, and the `ahead` info is gone for good.
-2. When a branch is later found to be `gone` (post-fetch), look up its
-   pre-fetch ahead count. If it's greater than zero, skip deletion and
-   log `Skipped (unpushed local commits): ... is N commit(s) ahead of
-   its last known remote state` instead of deleting it.
-3. Verified against a real scratch repo + bare remote: a branch pushed
-   then deleted upstream (no unpushed commits) was deleted normally; a
-   branch pushed, then given one more local commit that was never
-   pushed, then deleted upstream, was correctly skipped and logged.
-4. **Found during real-world testing (not scratch-repo testing) that
-   this protection is best-effort, not reliable:** running a plain
-   `git fetch -p` — for any reason, from any tool, including just
-   inspecting repo state — prunes the ref and permanently destroys the
-   `ahead` signal before this service ever gets a chance to see it. In
-   one test run, a manual diagnostic `git fetch -p` executed moments
-   before the service ran was enough to make it force-delete a branch
-   that did have a local, never-pushed commit — because by the time the
-   service's own pre-fetch snapshot ran, the ref was already pruned and
-   the branch just looked like an ordinary gone branch.
-5. Decision: keep the best-effort behavior as-is rather than building
-   the more robust (and more complex) fix — persisting each branch's
-   last-known tip/remote SHA across polls, independent of git's own live
-   tracking state — and instead document the limitation prominently in
-   `docs/design.md` and `README.md`, plus a comment in `BranchCleaner.cs`
-   itself. See `docs/design.md`'s "Known limitation" section.
+Given the protection couldn't be made reliable without meaningfully more
+complexity (persisting each branch's last-known tip/remote SHA across
+polls, independent of git's own live tracking state), it was reverted
+entirely — `BranchCleaner.cs` is back to the original fetch → list →
+delete flow, no ahead-tracking. The behavior is now documented plainly
+instead: a gone branch is deleted regardless of unpushed local commits.
+See the warning near the top of `docs/design.md` and `README.md`.

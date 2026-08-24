@@ -15,6 +15,12 @@ destructively when the branch being deleted happens to be the one the
 user currently has checked out, and it must never delete protected
 branches (e.g. `master`/`dev`) regardless of tracking status.
 
+> ⚠️ **Note:** if a branch's remote tracking branch is gone, this tool
+> deletes it locally the same way the original one-liner does — even if
+> you have local commits on it that were never pushed anywhere. There is
+> no protection for unpushed work. Push, or otherwise back up, anything
+> you'd be upset to lose before its remote branch disappears.
+
 ## Scope
 
 A standalone .NET console app, hosted as a Windows Service, that
@@ -84,21 +90,15 @@ service restarts later the same day.
 1. Verify the path exists and contains a `.git` directory; if not, log a
    warning and skip that repo (don't crash the whole pass over one bad
    entry).
-2. Before fetching, run `git branch -vv` once and record any `ahead N`
-   count per branch. This has to happen *before* `fetch -p`: once the
-   prune removes a stale remote-tracking ref, git can no longer tell you
-   whether the branch had commits that were never pushed — the ahead/
-   behind comparison target is simply gone. This snapshot is the only
-   chance to catch it.
-3. Run `git fetch -p` in that repo (via `Process`, `WorkingDirectory` set
+2. Run `git fetch -p` in that repo (via `Process`, `WorkingDirectory` set
    to the repo path).
-4. Run `git branch -vv` again. Parse each line:
+3. Run `git branch -vv`. Parse each line:
    - Strip a leading `* ` (marks the currently checked-out branch) — if
      present, remember this branch as "current" for this repo.
    - A line is a deletion candidate only if it contains `: gone]`.
    - The branch name is the first whitespace-separated token after
      stripping the `* ` marker.
-5. For each deletion candidate:
+4. For each deletion candidate:
    - If it's the currently checked-out branch → log "skipped (checked
      out)", do not attempt deletion. (This is the exact failure mode the
      original bash one-liner would hit — `xargs git branch -D` erroring
@@ -106,46 +106,11 @@ service restarts later the same day.
      on git's own error.)
    - If its name is in `ProtectedBranches` → log "skipped (protected)",
      do not attempt deletion.
-   - If the pre-fetch snapshot showed it `ahead N` (N > 0) of its last
-     known remote state → log "skipped (unpushed local commits)" with
-     the count, do not attempt deletion. See "Known limitation" below —
-     this check is best-effort, not a guarantee.
    - Otherwise run `git branch -D <name>`. Log success or failure
      (capturing stderr) per branch. A single branch failing to delete
      (e.g. it's checked out in a linked worktree) does not stop the rest
-     of the batch.
-
-### Known limitation: unpushed-commit protection is best-effort
-
-The `ahead N` signal this relies on only exists in the brief window
-before *anything* runs `git fetch -p` (or an equivalent prune) after the
-remote branch is deleted. The very first such prune — from any source —
-permanently destroys it, with no trace that it happened:
-
-- An IDE's or Git client's background auto-fetch.
-- A manual `git fetch` or `git pull` you (or anyone) run in that repo.
-- This service's own previous run — once it has fetched-and-pruned a
-  branch once, it can never recover that branch's ahead-count again.
-- Even something as simple as inspecting the repo's state with
-  `git fetch -p` yourself before the service gets a chance to run.
-
-If any of those wins the race, the branch just looks like a plain `gone`
-branch by the time this service evaluates it — indistinguishable from
-one that was cleanly pushed and merged — and it **will** be force-deleted
-even if it had commits that were never pushed anywhere. This was observed
-directly during manual testing: running a diagnostic `git fetch -p` to
-preview which branches were gone, immediately before running the service,
-was enough to silently disable the protection for a branch that did have
-unpushed local commits.
-
-This is a deliberate trade-off, not a bug to be fixed silently: a fully
-reliable version would need to persist each branch's last-known tip and
-remote SHA across runs (independent of git's own live, and easily
-clobbered, tracking state) so it could detect "this branch has commits
-beyond what I last saw on the remote" even after some other process has
-already pruned the ref. That's future work, not implemented here.
-**Treat this protection as a nice-to-have that sometimes helps, not as a
-substitute for pushing or backing up work you care about.**
+     of the batch. Local commits on the branch, pushed or not, do not
+     prevent deletion — see the warning under "Problem" above.
 
 ### Logging
 
