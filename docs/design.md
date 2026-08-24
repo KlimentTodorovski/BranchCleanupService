@@ -84,15 +84,21 @@ service restarts later the same day.
 1. Verify the path exists and contains a `.git` directory; if not, log a
    warning and skip that repo (don't crash the whole pass over one bad
    entry).
-2. Run `git fetch -p` in that repo (via `Process`, `WorkingDirectory` set
+2. Before fetching, run `git branch -vv` once and record any `ahead N`
+   count per branch. This has to happen *before* `fetch -p`: once the
+   prune removes a stale remote-tracking ref, git can no longer tell you
+   whether the branch had commits that were never pushed — the ahead/
+   behind comparison target is simply gone. This snapshot is the only
+   chance to catch it.
+3. Run `git fetch -p` in that repo (via `Process`, `WorkingDirectory` set
    to the repo path).
-3. Run `git branch -vv`. Parse each line:
+4. Run `git branch -vv` again. Parse each line:
    - Strip a leading `* ` (marks the currently checked-out branch) — if
      present, remember this branch as "current" for this repo.
    - A line is a deletion candidate only if it contains `: gone]`.
    - The branch name is the first whitespace-separated token after
      stripping the `* ` marker.
-4. For each deletion candidate:
+5. For each deletion candidate:
    - If it's the currently checked-out branch → log "skipped (checked
      out)", do not attempt deletion. (This is the exact failure mode the
      original bash one-liner would hit — `xargs git branch -D` erroring
@@ -100,6 +106,14 @@ service restarts later the same day.
      on git's own error.)
    - If its name is in `ProtectedBranches` → log "skipped (protected)",
      do not attempt deletion.
+   - If the pre-fetch snapshot showed it `ahead N` (N > 0) of its last
+     known remote state → log "skipped (unpushed local commits)" with
+     the count, do not attempt deletion. This is a best-effort check: it
+     only catches unpushed commits on the *first* run after the remote
+     branch disappears. Once a run has fetched-and-pruned once, the
+     comparison target is gone for good and later runs can no longer
+     detect it — there's no local history of "what the ahead count used
+     to be" beyond that first observation.
    - Otherwise run `git branch -D <name>`. Log success or failure
      (capturing stderr) per branch. A single branch failing to delete
      (e.g. it's checked out in a linked worktree) does not stop the rest

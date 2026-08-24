@@ -1,5 +1,9 @@
 # BranchCleanupService
 
+> **Note:** This is a fully vibe-coded project — designed and
+> implemented end-to-end with [Claude Code](https://claude.com/claude-code),
+> with no hand-written code.
+
 A Windows Service that automates the classic
 
 ```bash
@@ -12,8 +16,9 @@ it yourself.
 
 Runs daily during working hours across one or more configured local git
 repositories. Never touches the branch you currently have checked out,
-and never deletes protected branches (`master`/`dev` by default), even
-if they somehow report as gone.
+never deletes protected branches (`master`/`dev` by default) even if
+they somehow report as gone, and never deletes a gone branch that still
+has commits you never pushed anywhere.
 
 ## How it works
 
@@ -21,11 +26,17 @@ Once installed as a Windows Service, it polls in the background and,
 once per weekday after a configured hour (default: 12:00), runs a
 cleanup pass over every repo in `RepoPaths`:
 
-1. `git fetch -p`
-2. `git branch -vv`, looking for branches marked `: gone]`
-3. For each gone branch:
+1. `git branch -vv` (before fetching, to catch any unpushed commits
+   while there's still something to compare against)
+2. `git fetch -p`
+3. `git branch -vv` again, looking for branches marked `: gone]`
+4. For each gone branch:
    - Currently checked out? → skipped and logged, never deleted.
    - In `ProtectedBranches`? → skipped and logged, never deleted.
+   - Had unpushed commits in step 1's snapshot? → skipped and logged,
+     never deleted. (This only catches unpushed work on the *first* run
+     after the remote branch disappears — once fetched-and-pruned once,
+     there's no longer anything to compare against.)
    - Otherwise → `git branch -D <name>`, success/failure logged.
 
 If the machine was asleep or the service wasn't running yet when the
